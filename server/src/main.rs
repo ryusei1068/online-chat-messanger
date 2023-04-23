@@ -2,9 +2,10 @@ use async_std::io::ReadExt;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
-use redis::{Commands, RedisResult, ConnectionLike, RedisError};
+use redis::{Commands, Connection, ConnectionLike, RedisError, RedisResult};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+extern crate redis;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Request {
@@ -17,15 +18,6 @@ struct Request {
 struct Response {
     status: String,
     detail: String,
-}
-
-extern crate redis;
-fn get_connection() -> redis::RedisResult<redis::Connection> {
-    // currently each connection is separate and not pooled.
-    // https://github.com/redis-rs/redis-rs/blob/7eab4cf39c5d18c4b7b9ae3f5cffd3e8878cc633/README.md#basic-operation
-    let client = redis::Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
-    Ok(conn)
 }
 
 struct Redis_Client;
@@ -41,8 +33,19 @@ impl Redis_Client {
         conn.get(key)
     }
 
-    fn is_existing_room<C: ConnectionLike>(conn: &mut C, room_name: &str) -> redis::RedisResult<bool> {
+    fn is_existing_room<C: ConnectionLike>(
+        conn: &mut C,
+        room_name: &str,
+    ) -> redis::RedisResult<bool> {
         conn.exists(room_name)
+    }
+
+    fn get_connection() -> redis::RedisResult<redis::Connection> {
+        // currently each connection is separate and not pooled.
+        // https://github.com/redis-rs/redis-rs/blob/7eab4cf39c5d18c4b7b9ae3f5cffd3e8878cc633/README.md#basic-operation
+        let client = redis::Client::open("redis://127.0.0.1/")?;
+        let conn = client.get_connection()?;
+        Ok(conn)
     }
 }
 
@@ -57,8 +60,21 @@ impl Handler {
            EnterRoom = 2,
            GetRooms = 3,
         */
-        let mut conn = get_connection().unwrap();
+        let connection_result = Redis_Client::get_connection();
+        let mut conn = if connection_result.is_ok() {
+            connection_result.unwrap()
+        } else {
+            return Response {
+                status: "error".to_string(),
+                detail: "internal server error".to_string(),
+            };
+        };
+
         match req.kind {
+            1 => Response {
+                status: "success".to_string(),
+                detail: format!("created a {:?}", req.room_name),
+            },
             2 => {
                 // TODO:confirm the existing room name
                 Response {
@@ -67,11 +83,19 @@ impl Handler {
                 }
             }
             3 => {
-                Response {
-                    status: "success".to_string(),
-                    detail: Redis_Client::get_rooms(&mut conn, "rooms").unwrap(),
+                let rooms = Redis_Client::get_rooms(&mut conn, "rooms");
+                if rooms.is_ok() {
+                    Response {
+                        status: "success".to_string(),
+                        detail: rooms.unwrap(),
+                    }
+                } else {
+                    Response {
+                        status: "error".to_string(),
+                        detail: "failed to get rooms".to_string(),
+                    }
                 }
-            },
+            }
             _ => Response {
                 status: "error".to_string(),
                 detail: "invalid request kind".to_string(),
@@ -135,13 +159,13 @@ fn test_invalid_request() {
     assert_eq!(acutal.detail, expeced.detail);
 }
 
-
 use redis_test::{MockCmd, MockRedisConnection};
 #[test]
 fn test_get_value_by_key() {
-    let mut mock_connection = MockRedisConnection::new(vec![
-        MockCmd::new(redis::cmd("GET").arg("rooms"), Ok("test01,test02")),
-    ]);
+    let mut mock_connection = MockRedisConnection::new(vec![MockCmd::new(
+        redis::cmd("GET").arg("rooms"),
+        Ok("test01,test02"),
+    )]);
 
     let expected = "test01,test02".to_string();
     let actual = Redis_Client::get_rooms(&mut mock_connection, "rooms").unwrap();
@@ -150,9 +174,10 @@ fn test_get_value_by_key() {
 
 #[test]
 fn test_is_existing_room() {
-    let mut mock_connection = MockRedisConnection::new(vec![
-        MockCmd::new(redis::cmd("EXISTS").arg("room01"), Ok("1")),
-    ]);
+    let mut mock_connection = MockRedisConnection::new(vec![MockCmd::new(
+        redis::cmd("EXISTS").arg("room01"),
+        Ok("1"),
+    )]);
 
     let actual = Redis_Client::is_existing_room(&mut mock_connection, "room01").unwrap();
     assert_eq!(actual, true);
@@ -160,9 +185,10 @@ fn test_is_existing_room() {
 
 #[test]
 fn test_add_room() {
-    let mut mock_connection = MockRedisConnection::new(vec![
-        MockCmd::new(redis::cmd("SET").arg("room01").arg(""), Ok("1")),
-    ]);
+    let mut mock_connection = MockRedisConnection::new(vec![MockCmd::new(
+        redis::cmd("SET").arg("room01").arg(""),
+        Ok("1"),
+    )]);
 
     let actual = Redis_Client::add_room(&mut mock_connection, "room01").unwrap();
     assert_eq!(actual, true);
