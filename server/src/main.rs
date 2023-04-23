@@ -2,10 +2,8 @@ use async_std::io::ReadExt;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
-use redis::{Client, Commands, Connection, RedisError, RedisResult};
-use serde::ser::Error;
+use redis::{Commands, RedisResult};
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Request {
@@ -39,12 +37,12 @@ impl Redis_Client {
         }
     }
 
-    fn add_key_value(&self, key: String, value: String) {
+    fn add_key_value(&self, key: &str, value: &str) {
         // TODO: need some error handling when not connection or failed to store data
         let _: RedisResult<()> = self.redis_client.get_connection().unwrap().set(key, value);
     }
 
-    fn get_value_by_key(&self, key: String) -> String {
+    fn get_value_by_key(&self, key: &str) -> String {
         // TODO: same as above
         self.redis_client
             .get_connection()
@@ -54,10 +52,10 @@ impl Redis_Client {
     }
 }
 
-struct Handler {}
+struct Handler;
 
 impl Handler {
-    fn client_handler(&self, req: Request) {
+    fn client_handler(req: Request) -> Response {
         // TODO: conditional branch by request info(create_room, enter_room, get_room. etc)
         /*
            request kind
@@ -65,12 +63,17 @@ impl Handler {
            EnterRoom = 2,
            GetRooms = 3,
         */
-        let response = match req.kind {
-            1 => print!(""),
-            _ => print!(""),
-        };
-
-        print!("{:?}", response);
+        let redis_cli = Redis_Client::new();
+        match req.kind {
+            3 => Response {
+                status: "Ok".to_string(),
+                detail: redis_cli.get_value_by_key("rooms"),
+            },
+            _ => Response {
+                status: "Error".to_string(),
+                detail: "invalid request kind".to_string(),
+            },
+        }
     }
 }
 
@@ -107,4 +110,22 @@ fn log_error(result: std::io::Result<()>) {
     if let Err(error) = result {
         eprintln!("Error: {}", error);
     }
+}
+
+#[test]
+fn test_invalid_request() {
+    let test_request = Request {
+        kind: 4,
+        room_name: "".to_string(),
+        max_capacity: 0,
+    };
+
+    let expeced = Response {
+        status: "Error".to_string(),
+        detail: "invalid request kind".to_string(),
+    };
+
+    let acutal = Handler::client_handler(test_request);
+    assert_eq!(acutal.status, expeced.status);
+    assert_eq!(acutal.detail, expeced.detail);
 }
