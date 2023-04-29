@@ -10,8 +10,7 @@ extern crate redis;
 #[derive(Serialize, Deserialize, Debug)]
 struct Request {
     kind: i32,
-    room_name: String,
-    max_capacity: i64,
+    room_name: String
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -24,12 +23,10 @@ struct Redis_Client;
 
 impl Redis_Client {
     fn add_room<C: ConnectionLike>(conn: &mut C, key: &str) -> redis::RedisResult<bool> {
-        // TODO: need some error handling when not connection or failed to store data
         conn.set(key, "")
     }
 
     fn get_rooms<C: ConnectionLike>(conn: &mut C, key: &str) -> redis::RedisResult<String> {
-        // TODO: same as above
         conn.get(key)
     }
 
@@ -144,8 +141,7 @@ fn log_error(result: std::io::Result<()>) {
 fn test_invalid_request() {
     let test_request = Request {
         kind: 4,
-        room_name: "".to_string(),
-        max_capacity: 0,
+        room_name: "".to_string()
     };
 
     let expeced = Response {
